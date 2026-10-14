@@ -1,4 +1,3 @@
-
 import json
 import logging
 
@@ -171,6 +170,8 @@ def execute():
     tool_arguments = {}
     timeout = 15
     server_id = None
+    execution_result_for_history = None
+    execution_duration_for_history = None
 
     try:
         if not server_name:
@@ -241,22 +242,58 @@ def execute():
             timeout=timeout,
         )
 
-        # Record successful execution.
-        save_execution(
-            server_id=server_id,
-            server_name=server_name,
-            tool_name=tool_name,
-            arguments=tool_arguments,
-            result=execution["result"],
-            status="success",
-            duration_ms=execution["duration_ms"],
-        )
+        # Preserve the result before checking whether the tool failed.
+        execution_result_for_history = execution.get("result")
+        execution_duration_for_history = execution.get("duration_ms")
 
-        execution_diagnostics = {
-            "success": True,
-            "code": "TOOL_EXECUTION_SUCCESS",
-            "message": f"Tool '{tool_name}' executed successfully.",
-        }
+        tool_result = execution_result_for_history
+
+        # MCP application-level tool errors may arrive in a normal
+        # protocol response with isError=True.
+        if (
+            isinstance(tool_result, dict)
+            and tool_result.get("isError") is True
+        ):
+            content = tool_result.get("content", [])
+
+            error_details = " ".join(
+                item["text"]
+                for item in content
+                if isinstance(item, dict)
+                and isinstance(item.get("text"), str)
+            ).strip()
+
+            execution_error = (
+                error_details
+                or "The MCP tool returned isError=true."
+            )
+
+            execution_diagnostics = {
+                "success": False,
+                "code": "MCP_TOOL_ERROR",
+                "message": execution_error,
+            }
+
+        else:
+            # Record successful execution only when the tool did not
+            # report an application-level error.
+            save_execution(
+                server_id=server_id,
+                server_name=server_name,
+                tool_name=tool_name,
+                arguments=tool_arguments,
+                result=execution_result_for_history,
+                status="success",
+                duration_ms=execution_duration_for_history,
+            )
+
+            execution_diagnostics = {
+                "success": True,
+                "code": "TOOL_EXECUTION_SUCCESS",
+                "message": (
+                    f"Tool '{tool_name}' executed successfully."
+                ),
+            }
 
     except json.JSONDecodeError:
         execution_error = (
@@ -285,7 +322,7 @@ def execute():
         execution_error = "Tool execution failed."
         execution_diagnostics = diagnose_execution_error(exc)
 
-    # Record failures when a usable request was parsed.
+    # Record failures, including MCP responses with isError=True.
     if (
         execution_error
         and tool_name
@@ -299,7 +336,9 @@ def execute():
                 server_name=server_name or "Unknown",
                 tool_name=tool_name,
                 arguments=tool_arguments,
+                result=execution_result_for_history,
                 status="error",
+                duration_ms=execution_duration_for_history,
                 error_message=execution_error,
             )
         except Exception as exc:
