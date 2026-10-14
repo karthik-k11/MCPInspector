@@ -1,661 +1,401 @@
+
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
-
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MCPInspector</title>
-
-    <link
-        rel="stylesheet"
-        href="{{ url_for('static', filename='style.css') }}"
-    >
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-
 <body>
-
 <main class="container">
 
     <header class="header">
-
         <div>
-            <p class="eyebrow">
-                LOCAL MCP WORKBENCH
-            </p>
-
+            <p class="eyebrow">LOCAL MCP WORKBENCH</p>
             <h1>MCPInspector</h1>
-
-            <p class="subtitle">
-                Inspect, test, and debug local stdio MCP servers.
-            </p>
+            <p class="subtitle">Inspect, test, and debug local stdio MCP servers.</p>
         </div>
-
-        <div class="status-badge">
-            LOCAL ONLY
-        </div>
-
+        <span class="status-badge">LOCAL ONLY</span>
     </header>
 
-
-    <!-- CONNECTION -->
-
+    <!-- SERVER CONNECTION -->
     <section class="panel">
-
-        <div class="panel-title">
-
+        <div class="panel-heading">
             <div>
-                <h2>Server Connection</h2>
-
-                <p>
-                    Connect to a local MCP server through stdio.
-                </p>
+                <p class="eyebrow">CONNECTION</p>
+                <h2>Server Configuration</h2>
+                <p class="muted">Connect to a local MCP server through stdio.</p>
             </div>
-
         </div>
 
-
-        <form
-            method="post"
-            action="{{ url_for('connect') }}"
-        >
-
+        <form method="post" action="{{ url_for('connect') }}">
             <div class="grid two">
-
                 <label>
                     Server Name
-
-                    <input
-                        type="text"
-                        name="server_name"
-                        value="{{ server_name|default('') }}"
-                        placeholder="My MCP Server"
-                        required
-                    >
+                    <input name="server_name"
+                           value="{{ server_name|default('') }}"
+                           placeholder="My MCP Server" required>
                 </label>
-
-
                 <label>
                     Command
-
-                    <input
-                        type="text"
-                        name="command"
-                        value="{{ command|default('') }}"
-                        placeholder="python"
-                        required
-                    >
+                    <input name="command"
+                           value="{{ command|default('') }}"
+                           placeholder="python" required>
                 </label>
-
             </div>
-
 
             <div class="grid two">
-
                 <label>
                     Arguments
-
-                    <textarea
-                        name="args"
-                        rows="4"
-                        spellcheck="false"
-                        placeholder='["server.py"]'
-                    >{{ args_text|default('[]')|trim }}</textarea>
-
-                    <small>
-                        JSON array of command-line arguments.
-                    </small>
+                    <textarea name="args" rows="4" spellcheck="false">{{ args_text|default('[]')|trim }}</textarea>
+                    <small>JSON array, for example ["server.py"]</small>
                 </label>
-
-
                 <label>
-                    Environment
-
-                    <textarea
-                        name="env"
-                        rows="4"
-                        spellcheck="false"
-                        placeholder='{"API_KEY": "example"}'
-                    >{{ env_text|default('{}')|trim }}</textarea>
-
-                    <small>
-                        JSON object.
-                    </small>
+                    Environment Variables
+                    <textarea name="env" rows="4" spellcheck="false">{{ env_text|default('{}')|trim }}</textarea>
+                    <small>JSON object. Values are not saved in server configurations.</small>
                 </label>
-
             </div>
-
 
             <div class="toolbar">
-
                 <label class="timeout">
-                    Timeout
-
-                    <input
-                        type="number"
-                        name="timeout"
-                        min="1"
-                        max="120"
-                        value="{{ timeout_text|default('15') }}"
-                    >
+                    Timeout (seconds)
+                    <input type="number" name="timeout" min="1" max="120"
+                           value="{{ timeout_text|default('15') }}" required>
                 </label>
-
-
-                <button
-                    type="submit"
-                    class="primary"
-                >
-                    Connect & Inspect
-                </button>
-
+                <button class="primary" type="submit">Connect &amp; Inspect</button>
             </div>
-
         </form>
-
     </section>
-
 
     <!-- CONNECTION ERROR -->
-
-    {% if execution_error %}
-
+    {% if error %}
     <section class="alert error">
-
-        <strong>
-            Execution Error
-        </strong>
-
-        <span>
-            {{ execution_error }}
-        </span>
-
+        <strong>Connection Error</strong>
+        <span>{{ error }}</span>
     </section>
-
     {% endif %}
 
-
-    {% if execution_diagnostics %}
-
-    <section class="panel diagnostics-panel">
-
-        <div class="panel-title">
-
-            <div>
-                <p class="eyebrow">
-                    EXECUTION DIAGNOSTICS
-                </p>
-
-                <h2>
-                    Tool Health
-                </h2>
-
+    <!-- SERVER DIAGNOSTICS -->
+    {% if diagnostics %}
+    <section class="panel">
+        <p class="eyebrow">DIAGNOSTICS</p>
+        <h2>Server Health</h2>
+        <div class="diagnostic-list">
+            {% for item in diagnostics.get('diagnostics', []) %}
+            <div class="diagnostic-item {{ item.level }}">
+                <span class="level">{{ item.level|upper }}</span>
+                <div>
+                    <strong>{{ item.code }}</strong>
+                    <p>{{ item.message }}</p>
+                </div>
             </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
 
+    <!-- SAVED SERVERS -->
+    <section class="panel">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">CONFIGURATION LIBRARY</p>
+                <h2>Saved Servers</h2>
+                <p class="muted">Configurations persisted in SQLite.</p>
+            </div>
+            <span class="count">{{ servers|default([])|length }} saved</span>
         </div>
 
+        {% if servers %}
+        <div class="server-grid">
+            {% for server in servers %}
+            <article class="server-card">
+                <div class="card-heading">
+                    <h3>{{ server.name }}</h3>
+                    <span class="mini-badge">SAVED</span>
+                </div>
 
-        <div class="diagnostic-item
-            {% if execution_diagnostics.success %}
-                success
-            {% else %}
-                error
-            {% endif %}
-        ">
+                <p class="command-line">{{ server.command }}</p>
 
-            <div class="diagnostic-status">
-                {% if execution_diagnostics.success %}
-                    SUCCESS
-                {% else %}
-                    ERROR
+                <div class="metadata">
+                    <span>Timeout: {{ server.timeout }}s</span>
+                    <span>Arguments: {{ server.args|length }}</span>
+                    <span>Environment keys: {{ server.env_keys|length }}</span>
+                </div>
+
+                {% if server.args %}
+                <details>
+                    <summary>View command arguments</summary>
+                    <pre>{{ server.args|tojson(indent=2) }}</pre>
+                </details>
                 {% endif %}
-            </div>
 
-            <div>
+                {% if server.env_keys %}
+                <details>
+                    <summary>View environment variable names</summary>
+                    <pre>{{ server.env_keys|tojson(indent=2) }}</pre>
+                </details>
+                {% endif %}
 
-                <strong>
-                    {{ execution_diagnostics.code }}
-                </strong>
-
-                <p>
-                    {{ execution_diagnostics.message }}
-                </p>
-
-            </div>
-
+                <p class="timestamp">Updated {{ server.updated_at }}</p>
+            </article>
+            {% endfor %}
         </div>
-
+        {% else %}
+        <div class="empty-state">
+            <h3>No saved servers yet</h3>
+            <p>Connect to a server to save its configuration here.</p>
+        </div>
+        {% endif %}
     </section>
-
-    {% endif %}
-
 
     {% if result %}
 
-
-    <!-- CAPABILITIES -->
-
-    <section class="capabilities">
-
+    <!-- DISCOVERED CAPABILITIES -->
+    <section class="panel">
         <div class="section-heading">
-
             <div>
-
-                <p class="eyebrow">
-                    DISCOVERED CAPABILITIES
-                </p>
-
-                <h2>
-                    {{ server_name }}
-                </h2>
-
+                <p class="eyebrow">DISCOVERED CAPABILITIES</p>
+                <h2>{{ server_name }}</h2>
             </div>
-
-
             <span class="count">
-
                 {{ result.tools|length }} tools ·
                 {{ result.resources|length }} resources ·
                 {{ result.prompts|length }} prompts
-
             </span>
-
         </div>
-
 
         <div class="capability-grid">
-
-
-            <!-- TOOLS -->
-
             <div class="capability-panel">
-
-                <div class="capability-header">
-
-                    <h3>
-                        Tools
-                    </h3>
-
-                    <span>
-                        {{ result.tools|length }}
-                    </span>
-
+                <div class="card-heading">
+                    <h3>Tools</h3>
+                    <span>{{ result.tools|length }}</span>
                 </div>
 
+                {% for tool in result.tools %}
+                <article class="capability-card">
+                    <h4>{{ tool.name }}</h4>
+                    <p>{{ tool.description or "No description provided." }}</p>
 
-                {% if result.tools %}
-
-                    {% for tool in result.tools %}
-
-                    <article class="capability-card">
-
-                        <h4>
-                            {{ tool.name }}
-                        </h4>
-
-                        <p>
-                            {{
-                                tool.description
-                                or
-                                "No description provided."
-                            }}
-                        </p>
-
-
-                        {% if tool.arguments %}
-
-                        <div class="argument-list">
-
-                            {% for argument in tool.arguments %}
-
-                            <div class="argument">
-
-                                <code>
-                                    {{ argument.name }}
-                                </code>
-
-                                <span>
-                                    {{ argument.type }}
-                                </span>
-
-                                {% if argument.required %}
-
-                                <b>
-                                    required
-                                </b>
-
-                                {% endif %}
-
-                            </div>
-
-                            {% endfor %}
-
+                    {% if tool.arguments %}
+                    <div class="argument-list">
+                        {% for argument in tool.arguments %}
+                        <div class="argument">
+                            <code>{{ argument.name }}</code>
+                            <span>{{ argument.type }}</span>
+                            {% if argument.required %}<b>Required</b>{% endif %}
                         </div>
-
-                        {% else %}
-
-                        <p class="muted">
-                            No arguments.
-                        </p>
-
-                        {% endif %}
-
-                    </article>
-
-                    {% endfor %}
-
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="muted">No arguments.</p>
+                    {% endif %}
+                </article>
                 {% else %}
-
-                    <p class="empty">
-                        No tools discovered.
-                    </p>
-
-                {% endif %}
-
+                <p class="empty-state">No tools discovered.</p>
+                {% endfor %}
             </div>
-
-
-            <!-- RESOURCES -->
 
             <div class="capability-panel">
-
-                <div class="capability-header">
-
-                    <h3>
-                        Resources
-                    </h3>
-
-                    <span>
-                        {{ result.resources|length }}
-                    </span>
-
+                <div class="card-heading">
+                    <h3>Resources</h3>
+                    <span>{{ result.resources|length }}</span>
                 </div>
 
-
-                {% if result.resources %}
-
-                    {% for resource in result.resources %}
-
-                    <article class="capability-card">
-
-                        <h4>
-                            {{ resource.name }}
-                        </h4>
-
-                        <code class="uri">
-                            {{ resource.uri }}
-                        </code>
-
-                        <p>
-                            {{
-                                resource.description
-                                or
-                                "No description provided."
-                            }}
-                        </p>
-
-                    </article>
-
-                    {% endfor %}
-
+                {% for resource in result.resources %}
+                <article class="capability-card">
+                    <h4>{{ resource.name }}</h4>
+                    <code class="uri">{{ resource.uri }}</code>
+                    <p>{{ resource.description or "No description provided." }}</p>
+                </article>
                 {% else %}
-
-                    <p class="empty">
-                        No resources discovered.
-                    </p>
-
-                {% endif %}
-
+                <p class="empty-state">No resources discovered.</p>
+                {% endfor %}
             </div>
-
-
-            <!-- PROMPTS -->
 
             <div class="capability-panel">
-
-                <div class="capability-header">
-
-                    <h3>
-                        Prompts
-                    </h3>
-
-                    <span>
-                        {{ result.prompts|length }}
-                    </span>
-
+                <div class="card-heading">
+                    <h3>Prompts</h3>
+                    <span>{{ result.prompts|length }}</span>
                 </div>
 
-
-                {% if result.prompts %}
-
-                    {% for prompt in result.prompts %}
-
-                    <article class="capability-card">
-
-                        <h4>
-                            {{ prompt.name }}
-                        </h4>
-
-                        <p>
-                            {{
-                                prompt.description
-                                or
-                                "No description provided."
-                            }}
-                        </p>
-
-                    </article>
-
-                    {% endfor %}
-
+                {% for prompt in result.prompts %}
+                <article class="capability-card">
+                    <h4>{{ prompt.name }}</h4>
+                    <p>{{ prompt.description or "No description provided." }}</p>
+                    {% if prompt.arguments %}
+                    <details>
+                        <summary>View prompt arguments</summary>
+                        <pre>{{ prompt.arguments|tojson(indent=2) }}</pre>
+                    </details>
+                    {% endif %}
+                </article>
                 {% else %}
-
-                    <p class="empty">
-                        No prompts discovered.
-                    </p>
-
-                {% endif %}
-
+                <p class="empty-state">No prompts discovered.</p>
+                {% endfor %}
             </div>
-
         </div>
-
     </section>
 
-
     <!-- TOOL EXECUTION -->
-
-    <section class="panel execution-panel">
-
-        <div class="panel-title">
-
-            <div>
-
-                <p class="eyebrow">
-                    TOOL EXECUTION
-                </p>
-
-                <h2>
-                    Run a discovered tool
-                </h2>
-
-                <p>
-                    Execution only happens when you explicitly click
-                    the button.
-                </p>
-
-            </div>
-
-        </div>
-
+    <section class="panel">
+        <p class="eyebrow">TOOL EXECUTION</p>
+        <h2>Run a Tool</h2>
+        <p class="muted">Choose a discovered tool and submit JSON arguments.</p>
 
         {% if result.tools %}
-
-        <form
-            method="post"
-            action="{{ url_for('execute') }}"
-        >
-
-            <input
-                type="hidden"
-                name="server_name"
-                value="{{ server_name }}"
-            >
-
-            <input
-                type="hidden"
-                name="command"
-                value="{{ command }}"
-            >
-
-            <input
-                type="hidden"
-                name="args"
-                value="{{ args_text }}"
-            >
-
-            <input
-                type="hidden"
-                name="env"
-                value="{{ env_text }}"
-            >
-
-            <input
-                type="hidden"
-                name="timeout"
-                value="{{ timeout_text }}"
-            >
-
+        <form method="post" action="{{ url_for('execute') }}">
+            <input type="hidden" name="server_name" value="{{ server_name }}">
+            <input type="hidden" name="command" value="{{ command }}">
+            <input type="hidden" name="args" value="{{ args_text }}">
+            <input type="hidden" name="env" value="{{ env_text }}">
+            <input type="hidden" name="timeout" value="{{ timeout_text }}">
 
             <div class="grid two">
-
                 <label>
                     Tool
-
-                    <select
-                        name="tool_name"
-                        required
-                    >
-
-                        <option value="">
-                            Select a tool
-                        </option>
-
+                    <select name="tool_name" required>
+                        <option value="">Select a tool</option>
                         {% for tool in result.tools %}
-
-                        <option
-                            value="{{ tool.name }}"
-                            {% if selected_tool|default('') == tool.name %}
-                            selected
-                            {% endif %}
-                        >
+                        <option value="{{ tool.name }}"
+                            {% if selected_tool|default('') == tool.name %}selected{% endif %}>
                             {{ tool.name }}
                         </option>
-
                         {% endfor %}
-
                     </select>
-
                 </label>
-
 
                 <label>
                     JSON Arguments
-
-                    <textarea
-                        name="tool_arguments"
-                        rows="8"
-                        spellcheck="false"
-                    >{{ tool_arguments_text|default('{}')|trim }}</textarea>
-
-                    <small>
-                        Pass arguments as a JSON object.
-                    </small>
-
+                    <textarea name="tool_arguments" rows="7" spellcheck="false">{{ tool_arguments_text|default('{}')|trim }}</textarea>
+                    <small>Enter a JSON object, for example {"query": "hello"}.</small>
                 </label>
-
             </div>
 
-
-            <button
-                type="submit"
-                class="primary execute-button"
-            >
-                Execute Tool
-            </button>
-
+            <button class="primary" type="submit">Execute Tool</button>
         </form>
-
         {% else %}
-
-        <p class="empty">
-            No executable tools were discovered.
-        </p>
-
+        <p class="empty-state">No executable tools were discovered.</p>
         {% endif %}
-
     </section>
 
+    {% endif %}
 
     <!-- EXECUTION ERROR -->
-
     {% if execution_error %}
-
     <section class="alert error">
-
-        <strong>
-            Execution Error
-        </strong>
-
-        <span>
-            {{ execution_error }}
-        </span>
-
+        <strong>Execution Error</strong>
+        <span>{{ execution_error }}</span>
     </section>
-
     {% endif %}
 
+    <!-- EXECUTION DIAGNOSTICS -->
+    {% if execution_diagnostics %}
+    <section class="panel">
+        <p class="eyebrow">EXECUTION DIAGNOSTICS</p>
+        <div class="diagnostic-item {{ 'success' if execution_diagnostics.success else 'error' }}">
+            <span class="level">{{ 'SUCCESS' if execution_diagnostics.success else 'ERROR' }}</span>
+            <div>
+                <strong>{{ execution_diagnostics.code }}</strong>
+                <p>{{ execution_diagnostics.message }}</p>
+            </div>
+        </div>
+    </section>
+    {% endif %}
 
     <!-- EXECUTION RESULT -->
-
     {% if execution %}
-
-    <section class="panel result-panel">
-
-        <div class="result-header">
-
+    <section class="panel">
+        <div class="section-heading">
             <div>
-
-                <p class="eyebrow">
-                    EXECUTION RESULT
-                </p>
-
-                <h2>
-                    {{ execution.tool }}
-                </h2>
-
+                <p class="eyebrow">EXECUTION RESULT</p>
+                <h2>{{ execution.tool }}</h2>
             </div>
+            <span class="duration">{{ execution.duration_ms }} ms</span>
+        </div>
+        <pre>{{ execution.result|tojson(indent=2) }}</pre>
+    </section>
+    {% endif %}
 
-
-            <span class="duration">
-                {{ execution.duration_ms }} ms
-            </span>
-
+    <!-- EXECUTION HISTORY -->
+    <section class="panel">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">PERSISTED RECORDS</p>
+                <h2>Execution History</h2>
+                <p class="muted">Recent tool executions stored in SQLite.</p>
+            </div>
+            <span class="count">{{ history|default([])|length }} records</span>
         </div>
 
+        {% if history %}
+        <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Tool</th>
+                        <th>Server</th>
+                        <th>Status</th>
+                        <th>Duration</th>
+                        <th>Time</th>
+                        <th>Details</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in history %}
+                    <tr>
+                        <td class="tool-cell">{{ item.tool_name }}</td>
+                        <td>{{ item.server_name }}</td>
+                        <td>
+                            <span class="status-pill {{ item.status|lower }}">
+                                {{ item.status|upper }}
+                            </span>
+                        </td>
+                        <td>
+                            {% if item.duration_ms is not none %}
+                                {{ item.duration_ms }} ms
+                            {% else %}
+                                —
+                            {% endif %}
+                        </td>
+                        <td class="timestamp">{{ item.created_at }}</td>
+                        <td>
+                            <details>
+                                <summary>Inspect</summary>
+                                <div class="history-details">
+                                    <strong>Arguments</strong>
+                                    <pre>{{ item.arguments|tojson(indent=2) }}</pre>
 
-        <pre>{{ execution.result|tojson(indent=2) }}</pre>
+                                    {% if item.result is not none %}
+                                    <strong>Result</strong>
+                                    <pre>{{ item.result|tojson(indent=2) }}</pre>
+                                    {% endif %}
 
+                                    {% if item.error_message %}
+                                    <strong>Error</strong>
+                                    <pre>{{ item.error_message }}</pre>
+                                    {% endif %}
+                                </div>
+                            </details>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <h3>No execution history yet</h3>
+            <p>Successful and failed tool calls will appear here.</p>
+        </div>
+        {% endif %}
     </section>
 
-    {% endif %}
-
-
-    {% endif %}
+    <footer class="footer">
+        MCPInspector · Local MCP debugging workbench
+    </footer>
 
 </main>
-
 </body>
 </html>
