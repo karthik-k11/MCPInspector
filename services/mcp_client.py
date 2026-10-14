@@ -192,8 +192,8 @@ def inspect_server(
     env=None,
     timeout=15,
 ):
-    args = args or []
-    env = env or {}
+    args = [] if args is None else args
+    env = {} if env is None else env
 
     _validate_inputs(
         command,
