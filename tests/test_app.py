@@ -211,3 +211,47 @@ def test_tool_execution_records_failure(
     assert len(history) == 1
     assert history[0]["status"] == "error"
     assert history[0]["tool_name"] == "add"
+
+def test_tool_error_response_is_recorded_as_failure(client, monkeypatch):
+    monkeypatch.setattr(
+        app_module,
+        "inspect_server",
+        fake_inspection,
+    )
+
+    monkeypatch.setattr(
+        app_module,
+        "execute_tool",
+        lambda **kwargs: {
+            "tool": "add",
+            "duration_ms": 2.5,
+            "result": {
+                "content": [
+                    {"type": "text", "text": "Invalid input"}
+                ],
+                "isError": True,
+            },
+        },
+    )
+
+    response = client.post(
+        "/execute",
+        data={
+            "server_name": "Test Server",
+            "command": "python",
+            "args": "[]",
+            "env": "{}",
+            "timeout": "15",
+            "tool_name": "add",
+            "tool_arguments": '{"a": 2, "b": 3}',
+        },
+    )
+
+    assert response.status_code == 200
+
+    history = app_module.get_execution_history()
+
+    assert len(history) == 1
+    assert history[0]["status"] == "error"
+    assert "Invalid input" in history[0]["error_message"]
+    assert history[0]["result"]["isError"] is True
