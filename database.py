@@ -48,6 +48,23 @@ def init_db():
                     ON DELETE SET NULL
             );
 
+            CREATE TABLE IF NOT EXISTS connection_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                server_id INTEGER,
+                server_name TEXT NOT NULL,
+                command TEXT NOT NULL,
+                status TEXT NOT NULL,
+                duration_ms REAL,
+                error_message TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (server_id)
+                    REFERENCES servers(id)
+                    ON DELETE SET NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_connection_history_created_at
+            ON connection_history(created_at DESC);
+
             CREATE INDEX IF NOT EXISTS idx_history_created_at
             ON execution_history(created_at DESC);
 

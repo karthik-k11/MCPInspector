@@ -148,3 +148,64 @@ def get_execution_history(limit=50):
         history.append(item)
 
     return history
+    
+def save_connection_attempt(
+    server_id,
+    server_name,
+    command,
+    status,
+    duration_ms=None,
+    error_message=None,
+):
+    from database import get_connection
+
+    with get_connection() as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO connection_history (
+                server_id,
+                server_name,
+                command,
+                status,
+                duration_ms,
+                error_message
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                server_id,
+                server_name,
+                command,
+                status,
+                duration_ms,
+                error_message,
+            ),
+        )
+        return cursor.lastrowid
+
+
+def get_connection_history(limit=50):
+    from database import get_connection
+
+    limit = max(1, min(int(limit), 200))
+
+    with get_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT
+                id,
+                server_id,
+                server_name,
+                command,
+                status,
+                duration_ms,
+                error_message,
+                created_at
+            FROM connection_history
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+    return [dict(row) for row in rows]

@@ -1,5 +1,7 @@
+
 import json
 import logging
+import time
 
 from flask import Flask, render_template, request
 
@@ -10,8 +12,10 @@ from services.diagnostics import (
     validate_server_config,
 )
 from services.history_service import (
+    get_connection_history,
     get_execution_history,
     get_servers,
+    save_connection_attempt,
     save_execution,
     save_server,
 )
@@ -46,6 +50,7 @@ def index():
         tool_arguments_text="{}",
         servers=get_servers(),
         history=get_execution_history(),
+        connection_history=get_connection_history(),
     )
 
 
@@ -60,6 +65,8 @@ def connect():
     result = None
     error = None
     diagnostics = None
+    server_id = None
+    started_at = time.perf_counter()
 
     try:
         if not server_name:
@@ -81,8 +88,8 @@ def connect():
                 "Server configuration contains errors."
             )
 
-        # Save the configuration without storing environment values.
-        save_server(
+        # Save configuration without storing environment values.
+        server_id = save_server(
             name=server_name,
             command=command,
             args=args,
@@ -115,9 +122,7 @@ def connect():
     except (TimeoutError, ValueError) as exc:
         error = str(exc)
 
-        if isinstance(exc, TimeoutError):
-            diagnostics = diagnose_connection_error(exc)
-        elif diagnostics is None:
+        if isinstance(exc, TimeoutError) or diagnostics is None:
             diagnostics = diagnose_connection_error(exc)
 
     except Exception as exc:
@@ -127,6 +132,32 @@ def connect():
         )
         error = "Connection failed. Check the server configuration."
         diagnostics = diagnose_connection_error(exc)
+
+    # Persist both successful and failed connection attempts.
+    duration_ms = round(
+        (time.perf_counter() - started_at) * 1000,
+        2,
+    )
+
+    connection_status = (
+        "success" if result is not None and error is None
+        else "error"
+    )
+
+    try:
+        save_connection_attempt(
+            server_id=server_id,
+            server_name=server_name or "Unknown",
+            command=command,
+            status=connection_status,
+            duration_ms=duration_ms,
+            error_message=error,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Could not save connection history (%s).",
+            type(exc).__name__,
+        )
 
     return render_template(
         "index.html",
@@ -145,6 +176,7 @@ def connect():
         tool_arguments_text="{}",
         servers=get_servers(),
         history=get_execution_history(),
+        connection_history=get_connection_history(),
     )
 
 
@@ -242,14 +274,13 @@ def execute():
             timeout=timeout,
         )
 
-        # Preserve the result before checking whether the tool failed.
         execution_result_for_history = execution.get("result")
         execution_duration_for_history = execution.get("duration_ms")
 
         tool_result = execution_result_for_history
 
-        # MCP application-level tool errors may arrive in a normal
-        # protocol response with isError=True.
+        # An MCP tool can return a protocol response that indicates
+        # an application-level failure with isError=True.
         if (
             isinstance(tool_result, dict)
             and tool_result.get("isError") is True
@@ -275,8 +306,6 @@ def execute():
             }
 
         else:
-            # Record successful execution only when the tool did not
-            # report an application-level error.
             save_execution(
                 server_id=server_id,
                 server_name=server_name,
@@ -322,7 +351,7 @@ def execute():
         execution_error = "Tool execution failed."
         execution_diagnostics = diagnose_execution_error(exc)
 
-    # Record failures, including MCP responses with isError=True.
+    # Record failed executions, preserving any returned tool response.
     if (
         execution_error
         and tool_name
@@ -364,6 +393,7 @@ def execute():
         tool_arguments_text=tool_arguments_text,
         servers=get_servers(),
         history=get_execution_history(),
+        connection_history=get_connection_history(),
     )
 
 
