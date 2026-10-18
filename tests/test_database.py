@@ -111,3 +111,37 @@ def test_server_with_same_name_is_updated(tmp_path, monkeypatch):
     assert len(servers) == 1
     assert servers[0]["args"] == ["updated_server.py"]
     assert servers[0]["timeout"] == 20
+
+
+def test_connection_attempts_are_saved_and_retrieved():
+    from services.history_service import (
+        get_connection_history,
+        save_connection_attempt,
+    )
+
+    save_connection_attempt(
+        server_id=None,
+        server_name="Working Server",
+        command="python",
+        status="success",
+        duration_ms=125.5,
+    )
+
+    save_connection_attempt(
+        server_id=None,
+        server_name="Broken Server",
+        command="missing-server",
+        status="error",
+        duration_ms=40.2,
+        error_message="Executable not found",
+    )
+
+    history = get_connection_history()
+
+    assert len(history) == 2
+    assert history[0]["server_name"] == "Broken Server"
+    assert history[0]["status"] == "error"
+    assert history[0]["error_message"] == "Executable not found"
+    assert history[1]["server_name"] == "Working Server"
+    assert history[1]["status"] == "success"
+    assert history[1]["duration_ms"] == 125.5
