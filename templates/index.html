@@ -5,564 +5,476 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MCPInspector</title>
-    <link
-        rel="stylesheet"
-        href="{{ url_for('static', filename='style.css') }}"
-    >
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="{{ url_for('static', filename='app.js') }}" defer></script>
 </head>
 <body>
-    <main class="container">
-        <header class="page-header">
+<main class="container">
+    <header class="page-header">
+        <div>
+            <h1>MCPInspector</h1>
+            <p>Inspect, test, and debug MCP servers locally.</p>
+        </div>
+        <span class="badge">LOCAL WORKBENCH</span>
+    </header>
+
+    <!-- Server Configuration -->
+    <section class="panel">
+        <div class="section-header">
             <div>
-                <h1>MCPInspector</h1>
-                <p>Inspect, test, and debug MCP servers locally.</p>
+                <h2>Server Configuration</h2>
+                <p>Configure and connect to a local stdio MCP server.</p>
             </div>
-            <span class="badge">LOCAL WORKBENCH</span>
-        </header>
+        </div>
 
-        <!-- Server Configuration -->
-        <section class="panel">
-            <div class="section-header">
-                <div>
-                    <h2>Server Configuration</h2>
-                    <p>Configure and connect to a local stdio MCP server.</p>
-                </div>
-            </div>
-
-            <form action="{{ url_for('connect') }}" method="post">
-                <div class="form-grid">
-                    <div class="form-group">
-                        <label for="server_name">Server name</label>
-                        <input
-                            id="server_name"
-                            name="server_name"
-                            type="text"
-                            value="{{ server_name }}"
-                            placeholder="My MCP Server"
-                            required
-                        >
-                    </div>
-
-                    <div class="form-group">
-                        <label for="command">Executable / command</label>
-                        <input
-                            id="command"
-                            name="command"
-                            type="text"
-                            value="{{ command }}"
-                            placeholder="python"
-                            required
-                        >
-                    </div>
-
-                    <div class="form-group">
-                        <label for="timeout">Timeout (seconds)</label>
-                        <input
-                            id="timeout"
-                            name="timeout"
-                            type="number"
-                            min="1"
-                            step="1"
-                            value="{{ timeout_text }}"
-                            required
-                        >
-                    </div>
-                </div>
-
+        <form action="{{ url_for('connect') }}" method="post">
+            <div class="form-grid">
                 <div class="form-group">
-                    <label for="args">Command arguments (JSON array)</label>
-                    <textarea
-                        id="args"
-                        name="args"
-                        rows="3"
-                        required
-                    >{{ args_text }}</textarea>
+                    <label for="server_name">Server name</label>
+                    <input id="server_name" name="server_name" type="text"
+                           value="{{ server_name }}" placeholder="My MCP Server" required>
                 </div>
-
                 <div class="form-group">
-                    <label for="env">Environment variables (JSON object)</label>
-                    <textarea
-                        id="env"
-                        name="env"
-                        rows="3"
-                        required
-                    >{{ env_text }}</textarea>
-                    <small>
-                        Environment values are not saved in the server configuration.
-                    </small>
+                    <label for="command">Executable / command</label>
+                    <input id="command" name="command" type="text"
+                           value="{{ command }}" placeholder="python" required>
                 </div>
-
-                <button type="submit">Connect and Inspect</button>
-            </form>
-
-            {% if error %}
-                <div class="alert alert-error" role="alert">
-                    <strong>Connection failed</strong>
-                    <p>{{ error }}</p>
+                <div class="form-group">
+                    <label for="timeout">Timeout (seconds)</label>
+                    <input id="timeout" name="timeout" type="number"
+                           min="1" step="1" value="{{ timeout_text }}" required>
                 </div>
-            {% endif %}
-
-            {% if diagnostics and diagnostics.get('diagnostics') %}
-                <div class="diagnostics">
-                    <h3>Connection Diagnostics</h3>
-                    {% for item in diagnostics.get('diagnostics', []) %}
-                        <div class="diagnostic-item">
-                            <strong>{{ item.get('code', 'DIAGNOSTIC') }}</strong>
-                            <span>{{ item.get('message', '') }}</span>
-                        </div>
-                    {% endfor %}
-                </div>
-            {% endif %}
-        </section>
-
-        <!-- Saved Servers -->
-        <section class="panel">
-            <div class="section-header">
-                <div>
-                    <h2>Saved Servers</h2>
-                    <p>Previously configured MCP servers.</p>
-                </div>
-                <span class="count-badge">
-                    {{ servers|default([])|length }} servers
-                </span>
             </div>
 
-            {% if servers %}
-                <div class="card-grid">
-                    {% for server in servers %}
-                        <article class="server-card">
-                            <h3>{{ server.name }}</h3>
+            <div class="form-group">
+                <label for="args">Command arguments (JSON array)</label>
+                <textarea id="args" name="args" rows="3" required>{{ args_text }}</textarea>
+            </div>
 
-                            <p>
-                                <strong>Command:</strong>
-                                <code>{{ server.command }}</code>
-                            </p>
+            <div class="form-group">
+                <label for="env">Environment variables (JSON object)</label>
+                <textarea id="env" name="env" rows="3" required autocomplete="off">{{ env_text }}</textarea>
+                <small>Values stay in app memory until restart; only variable names are saved.</small>
+            </div>
 
-                            <p>
-                                <strong>Timeout:</strong>
-                                {{ server.timeout }} seconds
-                            </p>
+            <button type="submit">Connect and Inspect</button>
+        </form>
 
-                            <p>
-                                <strong>Arguments:</strong>
-                                {{ server.args|length }}
-                            </p>
-
-                            <p>
-                                <strong>Environment keys:</strong>
-                                {{ server.env_keys|length }}
-                            </p>
-
-                            <details>
-                                <summary>Configuration details</summary>
-                                <p><strong>Arguments</strong></p>
-                                <pre>{{ server.args|tojson(indent=2) }}</pre>
-
-                                <p><strong>Environment variable names</strong></p>
-                                <pre>{{ server.env_keys|tojson(indent=2) }}</pre>
-                            </details>
-
-                            <small>
-                                Updated: {{ server.updated_at }}
-                            </small>
-
-                            <form action="{{ url_for('connect') }}" method="post">
-                                <input
-                                    type="hidden"
-                                    name="server_name"
-                                    value="{{ server.name }}"
-                                >
-                                <input
-                                    type="hidden"
-                                    name="command"
-                                    value="{{ server.command }}"
-                                >
-                                <input
-                                    type="hidden"
-                                    name="args"
-                                    value="{{ server.args|tojson }}"
-                                >
-                                <input
-                                    type="hidden"
-                                    name="env"
-                                    value="{}"
-                                >
-                                <input
-                                    type="hidden"
-                                    name="timeout"
-                                    value="{{ server.timeout }}"
-                                >
-                                <button type="submit" class="button-secondary">
-                                    Reconnect
-                                </button>
-                            </form>
-                        </article>
-                    {% endfor %}
-                </div>
-            {% else %}
-                <p class="empty-state">No saved servers yet.</p>
-            {% endif %}
-        </section>
-
-        <!-- Capability Discovery -->
-        {% if result %}
-            <section class="panel">
-                <div class="section-header">
-                    <div>
-                        <h2>Server Capabilities</h2>
-                        <p>Capabilities discovered from the connected server.</p>
-                    </div>
-                    <span class="status-success">Connected</span>
-                </div>
-
-                <div class="capability-summary">
-                    <div class="summary-card">
-                        <span>Tools</span>
-                        <strong>{{ result.get('tools', [])|length }}</strong>
-                    </div>
-                    <div class="summary-card">
-                        <span>Resources</span>
-                        <strong>{{ result.get('resources', [])|length }}</strong>
-                    </div>
-                    <div class="summary-card">
-                        <span>Prompts</span>
-                        <strong>{{ result.get('prompts', [])|length }}</strong>
-                    </div>
-                </div>
-
-                <h3>Tools</h3>
-
-                {% if result.get('tools') %}
-                    <div class="card-grid">
-                        {% for tool in result.get('tools', []) %}
-                            <article class="capability-card">
-                                <h4>{{ tool.name }}</h4>
-                                <p>{{ tool.description or 'No description provided.' }}</p>
-
-                                <details>
-                                    <summary>Input schema and arguments</summary>
-                                    <pre>{{ tool.input_schema|tojson(indent=2) }}</pre>
-
-                                    {% if tool.arguments %}
-                                        <h4>Argument details</h4>
-                                        <ul>
-                                            {% for argument in tool.arguments %}
-                                                <li>
-                                                    <code>{{ argument.name }}</code>
-                                                    — {{ argument.type }}
-                                                    {% if argument.required %}
-                                                        <strong>(required)</strong>
-                                                    {% else %}
-                                                        (optional)
-                                                    {% endif %}
-                                                </li>
-                                            {% endfor %}
-                                        </ul>
-                                    {% endif %}
-                                </details>
-                            </article>
-                        {% endfor %}
-                    </div>
-                {% else %}
-                    <p class="empty-state">This server exposes no tools.</p>
-                {% endif %}
-
-                <h3>Resources</h3>
-
-                {% if result.get('resources') %}
-                    <div class="card-grid">
-                        {% for resource in result.get('resources', []) %}
-                            <article class="capability-card">
-                                <h4>{{ resource.name }}</h4>
-                                <p>{{ resource.description or 'No description provided.' }}</p>
-                                <p><strong>URI:</strong> <code>{{ resource.uri }}</code></p>
-                                {% if resource.mime_type %}
-                                    <p><strong>MIME type:</strong> {{ resource.mime_type }}</p>
-                                {% endif %}
-                            </article>
-                        {% endfor %}
-                    </div>
-                {% else %}
-                    <p class="empty-state">This server exposes no resources.</p>
-                {% endif %}
-
-                <h3>Prompts</h3>
-
-                {% if result.get('prompts') %}
-                    <div class="card-grid">
-                        {% for prompt in result.get('prompts', []) %}
-                            <article class="capability-card">
-                                <h4>{{ prompt.name }}</h4>
-                                <p>{{ prompt.description or 'No description provided.' }}</p>
-
-                                {% if prompt.arguments %}
-                                    <p><strong>Arguments</strong></p>
-                                    <ul>
-                                        {% for argument in prompt.arguments %}
-                                            <li>
-                                                {{ argument.name }}
-                                                {% if argument.required %}
-                                                    (required)
-                                                {% else %}
-                                                    (optional)
-                                                {% endif %}
-                                            </li>
-                                        {% endfor %}
-                                    </ul>
-                                {% endif %}
-                            </article>
-                        {% endfor %}
-                    </div>
-                {% else %}
-                    <p class="empty-state">This server exposes no prompts.</p>
-                {% endif %}
-            </section>
-
-            <!-- Tool Execution -->
-            <section class="panel">
-                <div class="section-header">
-                    <div>
-                        <h2>Tool Execution</h2>
-                        <p>Choose a discovered tool and submit JSON arguments.</p>
-                    </div>
-                </div>
-
-                <form action="{{ url_for('execute') }}" method="post">
-                    <input
-                        type="hidden"
-                        name="server_name"
-                        value="{{ server_name }}"
-                    >
-                    <input
-                        type="hidden"
-                        name="command"
-                        value="{{ command }}"
-                    >
-                    <input
-                        type="hidden"
-                        name="args"
-                        value="{{ args_text }}"
-                    >
-                    <input
-                        type="hidden"
-                        name="env"
-                        value="{{ env_text }}"
-                    >
-                    <input
-                        type="hidden"
-                        name="timeout"
-                        value="{{ timeout_text }}"
-                    >
-
-                    <div class="form-group">
-                        <label for="tool_name">Discovered tool</label>
-                        <select id="tool_name" name="tool_name" required>
-                            <option value="">Select a tool</option>
-                            {% for tool in result.get('tools', []) %}
-                                <option
-                                    value="{{ tool.name }}"
-                                    {% if selected_tool == tool.name %}selected{% endif %}
-                                >
-                                    {{ tool.name }}
-                                </option>
-                            {% endfor %}
-                        </select>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="tool_arguments">Tool arguments (JSON object)</label>
-                        <textarea
-                            id="tool_arguments"
-                            name="tool_arguments"
-                            rows="8"
-                            required
-                        >{{ tool_arguments_text }}</textarea>
-                    </div>
-
-                    <button
-                        type="submit"
-                        {% if not result.get('tools') %}disabled{% endif %}
-                    >
-                        Execute Tool
-                    </button>
-                </form>
-
-                {% if execution_error %}
-                    <div class="alert alert-error" role="alert">
-                        <strong>Tool execution failed</strong>
-                        <p>{{ execution_error }}</p>
-                    </div>
-                {% endif %}
-
-                {% if execution_diagnostics %}
-                    <div class="diagnostics">
-                        <h3>Execution Diagnostics</h3>
-                        <div class="diagnostic-item">
-                            <strong>
-                                {{ execution_diagnostics.get('code', 'EXECUTION_RESULT') }}
-                            </strong>
-                            <span>
-                                {{ execution_diagnostics.get('message', '') }}
-                            </span>
-                        </div>
-                    </div>
-                {% endif %}
-
-                {% if execution %}
-                    <div class="result-panel">
-                        <h3>Execution Response</h3>
-                        <p>
-                            <strong>Tool:</strong>
-                            {{ execution.get('tool', selected_tool) }}
-                        </p>
-                        <p>
-                            <strong>Duration:</strong>
-                            {{ execution.get('duration_ms', 0) }} ms
-                        </p>
-                        <pre>{{ execution.get('result')|tojson(indent=2) }}</pre>
-                    </div>
-                {% endif %}
-            </section>
+        {% if error %}
+        <div class="alert alert-error" role="alert">
+            <strong>Connection failed</strong>
+            <p>{{ error }}</p>
+        </div>
         {% endif %}
 
-        <!-- Connection History -->
-        <section class="panel">
-            <div class="section-header">
-                <div>
-                    <h2>Connection History</h2>
-                    <p>Recent MCP server connection attempts.</p>
-                </div>
-                <span class="count-badge">
-                    {{ connection_history|default([])|length }} attempts
-                </span>
+        {% if diagnostics %}
+        <div class="diagnostics">
+            <h3>Connection Diagnostics</h3>
+            {% if diagnostics.get('diagnostics') %}
+            {% for item in diagnostics.get('diagnostics', []) %}
+            <div class="diagnostic-item">
+                <strong>{{ item.get('code', 'DIAGNOSTIC') }}</strong>
+                <span>{{ item.get('message', '') }}</span>
+            </div>
+            {% endfor %}
+            {% else %}
+            <div class="diagnostic-item">
+                <strong>{{ diagnostics.get('code', 'CONNECTION_FAILED') }}</strong>
+                <span>{{ diagnostics.get('message', '') }}</span>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+    </section>
+
+    <!-- Saved Servers -->
+    <section class="panel">
+        <div class="section-header">
+            <div>
+                <h2>Saved Servers</h2>
+                <p>Previously configured MCP servers.</p>
+            </div>
+            <span class="count-badge">{{ servers|default([])|length }} servers</span>
+        </div>
+
+        {% if servers %}
+        <div class="card-grid">
+            {% for server in servers %}
+            <article class="server-card">
+                <h3>{{ server.name }}</h3>
+                <p><strong>Command:</strong> <code>{{ server.command }}</code></p>
+                <p><strong>Timeout:</strong> {{ server.timeout }} seconds</p>
+                <p><strong>Arguments:</strong> {{ server.args|length }}</p>
+                <p><strong>Environment keys saved:</strong> {{ server.env_keys|length }}</p>
+
+                <details>
+                    <summary>Configuration details</summary>
+                    <p><strong>Arguments</strong></p>
+                    <pre>{{ server.args|tojson(indent=2) }}</pre>
+                    <p><strong>Environment variable names</strong></p>
+                    <pre>{{ server.env_keys|tojson(indent=2) }}</pre>
+                </details>
+
+                <small>Updated: {{ server.updated_at }}</small>
+                {% if server.env_keys %}
+                <small>Secret values are not saved. Re-enter them above before reconnecting.</small>
+                {% endif %}
+
+                <form action="{{ url_for('connect') }}" method="post">
+                    <input type="hidden" name="server_name" value="{{ server.name }}">
+                    <input type="hidden" name="command" value="{{ server.command }}">
+                    <input type="hidden" name="args" value="{{ server.args|tojson }}">
+                    <input type="hidden" name="env" value="{}">
+                    <input type="hidden" name="timeout" value="{{ server.timeout }}">
+                    <button type="submit" class="button-secondary">Reconnect</button>
+                </form>
+            </article>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="empty-state">No saved servers yet.</p>
+        {% endif %}
+    </section>
+
+    <!-- Capability Discovery -->
+    {% if result %}
+    <section class="panel">
+        <div class="section-header">
+            <div>
+                <h2>Server Capabilities</h2>
+                <p>Capabilities discovered from the connected server.</p>
+            </div>
+            <span class="status-success">Connected</span>
+        </div>
+
+        <div class="capability-summary">
+            <div class="summary-card">
+                <span>Tools</span>
+                <strong>{{ result.get('tools', [])|length }}</strong>
+            </div>
+            <div class="summary-card">
+                <span>Resources</span>
+                <strong>{{ result.get('resources', [])|length }}</strong>
+            </div>
+            <div class="summary-card">
+                <span>Prompts</span>
+                <strong>{{ result.get('prompts', [])|length }}</strong>
+            </div>
+        </div>
+
+        <h3>Tools</h3>
+        {% if result.get('tools') %}
+        <div class="card-grid">
+            {% for tool in result.get('tools', []) %}
+            <article class="capability-card">
+                <h4>{{ tool.name }}</h4>
+                <p>{{ tool.description or 'No description provided.' }}</p>
+                <details>
+                    <summary>Input schema and arguments</summary>
+                    <pre>{{ tool.input_schema|tojson(indent=2) }}</pre>
+                    {% if tool.arguments %}
+                    <h4>Argument details</h4>
+                    <ul>
+                        {% for argument in tool.arguments %}
+                        <li>
+                            <code>{{ argument.name }}</code> — {{ argument.type }}
+                            {% if argument.required %}
+                            <strong>(required)</strong>
+                            {% else %}
+                            (optional)
+                            {% endif %}
+                        </li>
+                        {% endfor %}
+                    </ul>
+                    {% endif %}
+                </details>
+            </article>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="empty-state">This server exposes no tools.</p>
+        {% endif %}
+
+        <h3>Resources</h3>
+        {% if result.get('resources') %}
+        <div class="card-grid">
+            {% for resource in result.get('resources', []) %}
+            <article class="capability-card">
+                <h4>{{ resource.name }}</h4>
+                <p>{{ resource.description or 'No description provided.' }}</p>
+                <p><strong>URI:</strong> <code>{{ resource.uri }}</code></p>
+                {% if resource.mime_type %}
+                <p><strong>MIME type:</strong> {{ resource.mime_type }}</p>
+                {% endif %}
+            </article>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="empty-state">This server exposes no resources.</p>
+        {% endif %}
+
+        <h3>Prompts</h3>
+        {% if result.get('prompts') %}
+        <div class="card-grid">
+            {% for prompt in result.get('prompts', []) %}
+            <article class="capability-card">
+                <h4>{{ prompt.name }}</h4>
+                <p>{{ prompt.description or 'No description provided.' }}</p>
+                {% if prompt.arguments %}
+                <p><strong>Arguments</strong></p>
+                <ul>
+                    {% for argument in prompt.arguments %}
+                    <li>
+                        {{ argument.name }}
+                        {% if argument.required %}(required){% else %}(optional){% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </article>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="empty-state">This server exposes no prompts.</p>
+        {% endif %}
+    </section>
+
+    <!-- Tool Execution -->
+    <section class="panel">
+        <div class="section-header">
+            <div>
+                <h2>Tool Execution</h2>
+                <p>Choose a discovered tool and submit JSON arguments.</p>
+            </div>
+        </div>
+
+        <form action="{{ url_for('execute') }}" method="post">
+            <input type="hidden" name="server_id" value="{{ server_id or '' }}">
+
+            <div class="form-group">
+                <label for="tool_name">Discovered tool</label>
+                <select id="tool_name" name="tool_name" required>
+                    <option value="">Select a tool</option>
+                    {% for tool in result.get('tools', []) %}
+                    <option value="{{ tool.name }}"
+                        {% if selected_tool == tool.name %}selected{% endif %}>
+                        {{ tool.name }}
+                    </option>
+                    {% endfor %}
+                </select>
             </div>
 
-            {% if connection_history %}
-                <div class="table-wrapper">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Server</th>
-                                <th>Command</th>
-                                <th>Status</th>
-                                <th>Duration</th>
-                                <th>Timestamp</th>
-                                <th>Error details</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for attempt in connection_history %}
-                                <tr>
-                                    <td>{{ attempt.server_name }}</td>
-                                    <td><code>{{ attempt.command }}</code></td>
-                                    <td>
-                                        {% if attempt.status == 'success' %}
-                                            <span class="status-success">Connected</span>
-                                        {% else %}
-                                            <span class="status-error">Failed</span>
-                                        {% endif %}
-                                    </td>
-                                    <td>
-                                        {% if attempt.duration_ms is not none %}
-                                            {{ attempt.duration_ms }} ms
-                                        {% else %}
-                                            —
-                                        {% endif %}
-                                    </td>
-                                    <td>{{ attempt.created_at }}</td>
-                                    <td>
-                                        {% if attempt.error_message %}
-                                            {{ attempt.error_message }}
-                                        {% else %}
-                                            —
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            {% else %}
-                <p class="empty-state">No connection attempts recorded yet.</p>
-            {% endif %}
-        </section>
-
-        <!-- Execution History -->
-        <section class="panel">
-            <div class="section-header">
-                <div>
-                    <h2>Execution History</h2>
-                    <p>Recent MCP tool executions and their results.</p>
-                </div>
-                <span class="count-badge">
-                    {{ history|default([])|length }} executions
-                </span>
+            <div class="form-group">
+                <label for="tool_arguments">Tool arguments (JSON object)</label>
+                <textarea id="tool_arguments" name="tool_arguments"
+                          rows="8" required>{{ tool_arguments_text }}</textarea>
             </div>
 
-            {% if history %}
-                <div class="table-wrapper">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Tool</th>
-                                <th>Server</th>
-                                <th>Status</th>
-                                <th>Duration</th>
-                                <th>Timestamp</th>
-                                <th>Details</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for item in history %}
-                                <tr>
-                                    <td><code>{{ item.tool_name }}</code></td>
-                                    <td>{{ item.server_name }}</td>
-                                    <td>
-                                        {% if item.status == 'success' %}
-                                            <span class="status-success">Success</span>
-                                        {% else %}
-                                            <span class="status-error">Failed</span>
-                                        {% endif %}
-                                    </td>
-                                    <td>
-                                        {% if item.duration_ms is not none %}
-                                            {{ item.duration_ms }} ms
-                                        {% else %}
-                                            —
-                                        {% endif %}
-                                    </td>
-                                    <td>{{ item.created_at }}</td>
-                                    <td>
-                                        <details>
-                                            <summary>View request / response</summary>
+            <button type="submit" {% if not result.get('tools') %}disabled{% endif %}>
+                Execute Tool
+            </button>
+        </form>
 
-                                            <h4>Arguments</h4>
-                                            <pre>{{ item.arguments|tojson(indent=2) }}</pre>
+        {% if execution_error %}
+        <div class="alert alert-error" role="alert">
+            <strong>Tool execution failed</strong>
+            <p>{{ execution_error }}</p>
+        </div>
+        {% endif %}
 
-                                            {% if item.result is not none %}
-                                                <h4>Result</h4>
-                                                <pre>{{ item.result|tojson(indent=2) }}</pre>
-                                            {% endif %}
+        {% if execution_diagnostics %}
+        <div class="diagnostics">
+            <h3>Execution Diagnostics</h3>
+            <div class="diagnostic-item">
+                <strong>{{ execution_diagnostics.get('code', 'EXECUTION_RESULT') }}</strong>
+                <span>{{ execution_diagnostics.get('message', '') }}</span>
+            </div>
+        </div>
+        {% endif %}
 
-                                            {% if item.error_message %}
-                                                <h4>Error</h4>
-                                                <p>{{ item.error_message }}</p>
-                                            {% endif %}
-                                        </details>
-                                    </td>
-                                </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            {% else %}
-                <p class="empty-state">No tool executions recorded yet.</p>
-            {% endif %}
-        </section>
+        {% if execution %}
+        <div class="result-panel">
+            <h3>Execution Response</h3>
+            <p><strong>Tool:</strong> {{ execution.get('tool', selected_tool) }}</p>
+            <p><strong>Duration:</strong> {{ execution.get('duration_ms', 0) }} ms</p>
+            <pre>{{ execution.get('result')|tojson(indent=2) }}</pre>
+        </div>
+        {% endif %}
+    </section>
+    {% endif %}
 
-        <footer class="page-footer">
-            MCPInspector · Local MCP debugging workbench
-        </footer>
-    </main>
+    {% if execution_error and not result %}
+    <section class="panel" aria-live="polite">
+        <div class="alert alert-error" role="alert">
+            <strong>Tool execution failed</strong>
+            <p>{{ execution_error }}</p>
+        </div>
+        {% if execution_diagnostics %}
+        <div class="diagnostics">
+            <h3>Execution Diagnostics</h3>
+            <div class="diagnostic-item">
+                <strong>{{ execution_diagnostics.get('code', 'EXECUTION_RESULT') }}</strong>
+                <span>{{ execution_diagnostics.get('message', '') }}</span>
+            </div>
+        </div>
+        {% endif %}
+    </section>
+    {% endif %}
+
+    <!-- Connection History with Status Filter -->
+    <section class="panel">
+        <div class="section-header">
+            <div>
+                <h2>Connection History</h2>
+                <p>Recent MCP server connection attempts.</p>
+            </div>
+            <span class="count-badge">{{ connection_history|default([])|length }} attempts</span>
+        </div>
+
+        <div class="history-toolbar">
+            <label for="connectionStatusFilter">Filter connections</label>
+            <select id="connectionStatusFilter" class="history-filter">
+                <option value="all">All statuses</option>
+                <option value="success">Success only</option>
+                <option value="error">Failed only</option>
+            </select>
+            <span id="connectionFilterCount" class="filter-count"></span>
+        </div>
+
+        {% if connection_history %}
+        <div class="table-wrapper">
+            <table id="connectionHistoryTable">
+                <thead>
+                    <tr>
+                        <th>Server</th>
+                        <th>Command</th>
+                        <th>Status</th>
+                        <th>Duration</th>
+                        <th>Timestamp</th>
+                        <th>Error details</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for attempt in connection_history %}
+                    <tr data-status="{{ attempt.status }}">
+                        <td>{{ attempt.server_name }}</td>
+                        <td><code>{{ attempt.command }}</code></td>
+                        <td>
+                            {% if attempt.status == 'success' %}
+                            <span class="status-success">Connected</span>
+                            {% else %}
+                            <span class="status-error">Failed</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if attempt.duration_ms is not none %}
+                            {{ attempt.duration_ms }} ms
+                            {% else %}
+                            —
+                            {% endif %}
+                        </td>
+                        <td>{{ attempt.created_at }}</td>
+                        <td>{{ attempt.error_message or '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p id="connectionNoMatches" class="history-empty-filter">
+            No connection attempts match this filter.
+        </p>
+        {% else %}
+        <p class="empty-state">No connection attempts recorded yet.</p>
+        {% endif %}
+    </section>
+
+    <!-- Execution History with Status Filter -->
+    <section class="panel">
+        <div class="section-header">
+            <div>
+                <h2>Execution History</h2>
+                <p>Recent MCP tool executions and their results.</p>
+            </div>
+            <span class="count-badge">{{ history|default([])|length }} executions</span>
+        </div>
+
+        <div class="history-toolbar">
+            <label for="executionStatusFilter">Filter executions</label>
+            <select id="executionStatusFilter" class="history-filter">
+                <option value="all">All statuses</option>
+                <option value="success">Success only</option>
+                <option value="error">Failed only</option>
+            </select>
+            <span id="executionFilterCount" class="filter-count"></span>
+        </div>
+
+        {% if history %}
+        <div class="table-wrapper">
+            <table id="executionHistoryTable">
+                <thead>
+                    <tr>
+                        <th>Tool</th>
+                        <th>Server</th>
+                        <th>Status</th>
+                        <th>Duration</th>
+                        <th>Timestamp</th>
+                        <th>Details</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in history %}
+                    <tr data-status="{{ item.status }}">
+                        <td><code>{{ item.tool_name }}</code></td>
+                        <td>{{ item.server_name }}</td>
+                        <td>
+                            {% if item.status == 'success' %}
+                            <span class="status-success">Success</span>
+                            {% else %}
+                            <span class="status-error">Failed</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if item.duration_ms is not none %}
+                            {{ item.duration_ms }} ms
+                            {% else %}
+                            —
+                            {% endif %}
+                        </td>
+                        <td>{{ item.created_at }}</td>
+                        <td>
+                            <details>
+                                <summary>View request / response</summary>
+                                <h4>Arguments</h4>
+                                <pre>{{ item.arguments|tojson(indent=2) }}</pre>
+
+                                {% if item.result is not none %}
+                                <h4>Result</h4>
+                                <pre>{{ item.result|tojson(indent=2) }}</pre>
+                                {% endif %}
+
+                                {% if item.error_message %}
+                                <h4>Error</h4>
+                                <p>{{ item.error_message }}</p>
+                                {% endif %}
+                            </details>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p id="executionNoMatches" class="history-empty-filter">
+            No executions match this filter.
+        </p>
+        {% else %}
+        <p class="empty-state">No tool executions recorded yet.</p>
+        {% endif %}
+    </section>
+
+    <footer class="page-footer">
+        MCPInspector · Local MCP debugging workbench
+    </footer>
+</main>
+
 </body>
 </html>
