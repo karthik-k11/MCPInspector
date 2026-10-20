@@ -1,9 +1,16 @@
 import json
+from typing import Any
 
 from database import get_connection
 
 
-def save_server(name, command, args, env, timeout):
+def save_server(
+    name: str,
+    command: str,
+    args: list[str],
+    env: dict[str, str],
+    timeout: float,
+) -> int:
     """Save a server configuration without environment values."""
     with get_connection() as connection:
         existing = connection.execute(
@@ -49,7 +56,14 @@ def save_server(name, command, args, env, timeout):
         return cursor.lastrowid
 
 
-def get_servers():
+def _server_from_row(row: Any) -> dict[str, Any]:
+    server = dict(row)
+    server["args"] = json.loads(server.pop("args_json"))
+    server["env_keys"] = json.loads(server.pop("env_keys_json"))
+    return server
+
+
+def get_servers() -> list[dict[str, Any]]:
     with get_connection() as connection:
         rows = connection.execute(
             """
@@ -60,29 +74,34 @@ def get_servers():
             """
         ).fetchall()
 
-    servers = []
+    return [_server_from_row(row) for row in rows]
 
-    for row in rows:
-        server = dict(row)
-        server["args"] = json.loads(server.pop("args_json"))
-        server["env_keys"] = json.loads(
-            server.pop("env_keys_json")
-        )
-        servers.append(server)
 
-    return servers
+def get_server(server_id: int) -> dict[str, Any] | None:
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT id, name, command, args_json,
+                   env_keys_json, timeout, created_at, updated_at
+            FROM servers
+            WHERE id = ?
+            """,
+            (server_id,),
+        ).fetchone()
+
+    return _server_from_row(row) if row is not None else None
 
 
 def save_execution(
-    server_id,
-    server_name,
-    tool_name,
-    arguments,
-    result=None,
-    status="success",
-    duration_ms=None,
-    error_message=None,
-):
+    server_id: int | None,
+    server_name: str,
+    tool_name: str,
+    arguments: dict[str, Any],
+    result: Any = None,
+    status: str = "success",
+    duration_ms: float | None = None,
+    error_message: str | None = None,
+) -> int:
     """Store one tool execution. Never persist raw exceptions by default."""
     with get_connection() as connection:
         cursor = connection.execute(
@@ -114,7 +133,7 @@ def save_execution(
         return cursor.lastrowid
 
 
-def get_execution_history(limit=50):
+def get_execution_history(limit: int = 50) -> list[dict[str, Any]]:
     limit = max(1, min(int(limit), 200))
 
     with get_connection() as connection:
@@ -148,17 +167,16 @@ def get_execution_history(limit=50):
         history.append(item)
 
     return history
-    
-def save_connection_attempt(
-    server_id,
-    server_name,
-    command,
-    status,
-    duration_ms=None,
-    error_message=None,
-):
-    from database import get_connection
 
+
+def save_connection_attempt(
+    server_id: int | None,
+    server_name: str,
+    command: str,
+    status: str,
+    duration_ms: float | None = None,
+    error_message: str | None = None,
+) -> int:
     with get_connection() as connection:
         cursor = connection.execute(
             """
@@ -184,9 +202,7 @@ def save_connection_attempt(
         return cursor.lastrowid
 
 
-def get_connection_history(limit=50):
-    from database import get_connection
-
+def get_connection_history(limit: int = 50) -> list[dict[str, Any]]:
     limit = max(1, min(int(limit), 200))
 
     with get_connection() as connection:
