@@ -1,14 +1,58 @@
-import os
+import math
+import re
 import shutil
 from typing import Any
 
+_SENSITIVE_FIELDS = (
+    "apikey",
+    "token",
+    "secret",
+    "password",
+    "authorization",
+    "credential",
+    "privatekey",
+)
 
-def _mask_env(env: dict[str, str]) -> dict[str, str]:
-    """Return environment keys without exposing their values."""
-    return {
-        key: "***"
-        for key in env
-    }
+
+def redact_secrets(value: Any, env: dict[str, str]) -> Any:
+    """Remove configured environment values from displayable or stored data."""
+    env_values = env.values() if isinstance(env, dict) else ()
+    secrets = sorted(
+        (
+            secret
+            for secret in env_values
+            if isinstance(secret, str) and secret
+        ),
+        key=len,
+        reverse=True,
+    )
+
+    def redact(item: Any) -> Any:
+        if isinstance(item, str):
+            for secret in secrets:
+                item = item.replace(secret, "[REDACTED]")
+            return item
+        if isinstance(item, dict):
+            redacted = {}
+            for key, child in item.items():
+                normalized_key = re.sub(
+                    r"[^a-z0-9]",
+                    "",
+                    str(key).lower(),
+                )
+                redacted[key] = (
+                    "[REDACTED]"
+                    if normalized_key.endswith(_SENSITIVE_FIELDS)
+                    else redact(child)
+                )
+            return redacted
+        if isinstance(item, list):
+            return [redact(child) for child in item]
+        if isinstance(item, tuple):
+            return tuple(redact(child) for child in item)
+        return item
+
+    return redact(value)
 
 
 def validate_server_config(
@@ -21,7 +65,15 @@ def validate_server_config(
 
     diagnostics = []
 
-    command = command.strip()
+    if isinstance(command, str):
+        command = command.strip()
+    else:
+        command = ""
+        diagnostics.append({
+            "level": "error",
+            "code": "INVALID_COMMAND",
+            "message": "Executable command must be text.",
+        })
 
     if not command:
         diagnostics.append({
@@ -47,6 +99,17 @@ def validate_server_config(
             "code": "INVALID_ARGUMENTS",
             "message": "Server arguments must be a list.",
         })
+    elif any(
+        not isinstance(argument, str) or "\x00" in argument
+        for argument in args
+    ):
+        diagnostics.append({
+            "level": "error",
+            "code": "INVALID_ARGUMENT",
+            "message": (
+                "Server arguments must be strings without null bytes."
+            ),
+        })
 
     if not isinstance(env, dict):
         diagnostics.append({
@@ -68,18 +131,23 @@ def validate_server_config(
                 })
                 break
 
-            if "\x00" in key or "\x00" in value:
+            if not key or "=" in key or "\x00" in key or "\x00" in value:
                 diagnostics.append({
                     "level": "error",
-                    "code": "NULL_BYTE_ENV",
+                    "code": "INVALID_ENV_NAME",
                     "message": (
-                        "Environment variables cannot contain "
-                        "null bytes."
+                        "Environment variable names must be non-empty "
+                        "and cannot contain '=' or null bytes; values "
+                        "cannot contain null bytes."
                     ),
                 })
                 break
 
-    if not isinstance(timeout, (int, float)) or isinstance(timeout, bool):
+    if (
+        not isinstance(timeout, (int, float))
+        or isinstance(timeout, bool)
+        or not math.isfinite(timeout)
+    ):
         diagnostics.append({
             "level": "error",
             "code": "INVALID_TIMEOUT",
