@@ -4,16 +4,17 @@ from typing import Any
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from mcp.shared.exceptions import McpError
 
 
-def _field(obj: Any, name: str, default=None):
+def _field(obj: Any, name: str, default: Any = None) -> Any:
     if isinstance(obj, dict):
         return obj.get(name, default)
 
     return getattr(obj, name, default)
 
 
-def _serialize(value: Any):
+def _serialize(value: Any) -> Any:
     if hasattr(value, "model_dump"):
         return value.model_dump(mode="json", by_alias=True)
 
@@ -29,7 +30,7 @@ def _serialize(value: Any):
     return str(value)
 
 
-def _summarize_tools(result):
+def _summarize_tools(result: Any) -> list[dict[str, Any]]:
     tools = []
 
     for tool in _field(result, "tools", []) or []:
@@ -67,7 +68,7 @@ def _summarize_tools(result):
     return tools
 
 
-def _summarize_resources(result):
+def _summarize_resources(result: Any) -> list[dict[str, Any]]:
     resources = []
 
     for resource in _field(result, "resources", []) or []:
@@ -83,7 +84,7 @@ def _summarize_resources(result):
     return resources
 
 
-def _summarize_prompts(result):
+def _summarize_prompts(result: Any) -> list[dict[str, Any]]:
     prompts = []
 
     for prompt in _field(result, "prompts", []) or []:
@@ -100,14 +101,24 @@ def _summarize_prompts(result):
     return prompts
 
 
-def _validate_inputs(command, args, env, timeout):
+def _validate_inputs(
+    command: str,
+    args: list[str],
+    env: dict[str, str],
+    timeout: float,
+) -> None:
     if not isinstance(command, str) or not command.strip():
         raise ValueError("Enter an executable command.")
 
+    if "\x00" in command:
+        raise ValueError("The executable command cannot contain null bytes.")
+
     if not isinstance(args, list) or not all(
-        isinstance(item, str) for item in args
+        isinstance(item, str) and "\x00" not in item for item in args
     ):
-        raise ValueError("Arguments must be a list of strings.")
+        raise ValueError(
+            "Arguments must be strings and cannot contain null bytes."
+        )
 
     if not isinstance(env, dict) or not all(
         isinstance(k, str)
@@ -119,7 +130,7 @@ def _validate_inputs(command, args, env, timeout):
         for k, v in env.items()
     ):
         raise ValueError(
-            "Environment variables must be string key-value pairs."
+            "Environment variables must be valid string key-value pairs."
         )
 
     if not isinstance(timeout, (int, float)) or isinstance(timeout, bool):
@@ -131,7 +142,23 @@ def _validate_inputs(command, args, env, timeout):
         )
 
 
-async def _inspect_server(command, args, env):
+async def _list_optional_capability(
+    session: ClientSession,
+    method_name: str,
+) -> Any:
+    try:
+        return await getattr(session, method_name)()
+    except McpError as exc:
+        if exc.error.code == -32601:
+            return None
+        raise
+
+
+async def _inspect_server(
+    command: str,
+    args: list[str],
+    env: dict[str, str],
+) -> dict[str, list[dict[str, Any]]]:
     server = StdioServerParameters(
         command=command,
         args=args,
@@ -146,9 +173,18 @@ async def _inspect_server(command, args, env):
 
             await session.initialize()
 
-            tools_result = await session.list_tools()
-            resources_result = await session.list_resources()
-            prompts_result = await session.list_prompts()
+            tools_result = await _list_optional_capability(
+                session,
+                "list_tools",
+            )
+            resources_result = await _list_optional_capability(
+                session,
+                "list_resources",
+            )
+            prompts_result = await _list_optional_capability(
+                session,
+                "list_prompts",
+            )
 
             return {
                 "tools": _summarize_tools(tools_result),
@@ -158,12 +194,12 @@ async def _inspect_server(command, args, env):
 
 
 async def _execute_tool(
-    command,
-    args,
-    env,
-    tool_name,
-    arguments,
-):
+    command: str,
+    args: list[str],
+    env: dict[str, str],
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> Any:
     server = StdioServerParameters(
         command=command,
         args=args,
@@ -187,11 +223,11 @@ async def _execute_tool(
 
 
 def inspect_server(
-    command,
-    args=None,
-    env=None,
-    timeout=15,
-):
+    command: str,
+    args: list[str] | None = None,
+    env: dict[str, str] | None = None,
+    timeout: float = 15,
+) -> dict[str, list[dict[str, Any]]]:
     args = [] if args is None else args
     env = {} if env is None else env
 
@@ -222,16 +258,16 @@ def inspect_server(
 
 
 def execute_tool(
-    command,
-    args=None,
-    env=None,
-    tool_name="",
-    arguments=None,
-    timeout=15,
-):
-    args = args or []
-    env = env or {}
-    arguments = arguments or {}
+    command: str,
+    args: list[str] | None = None,
+    env: dict[str, str] | None = None,
+    tool_name: str = "",
+    arguments: dict[str, Any] | None = None,
+    timeout: float = 15,
+) -> dict[str, Any]:
+    args = [] if args is None else args
+    env = {} if env is None else env
+    arguments = {} if arguments is None else arguments
 
     _validate_inputs(
         command,
