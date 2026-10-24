@@ -1,6 +1,7 @@
 
 import json
 import logging
+import threading
 import time
 
 from flask import Flask, render_template, request
@@ -9,11 +10,13 @@ from database import init_db
 from services.diagnostics import (
     diagnose_connection_error,
     diagnose_execution_error,
+    redact_secrets,
     validate_server_config,
 )
 from services.history_service import (
     get_connection_history,
     get_execution_history,
+    get_server,
     get_servers,
     save_connection_attempt,
     save_execution,
@@ -28,6 +31,11 @@ app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Environment values are transient process memory only; they never enter the
+# rendered page or the SQLite database.
+server_environments: dict[int, dict[str, str]] = {}
+server_environments_lock = threading.Lock()
+
 init_db()
 
 
@@ -40,6 +48,7 @@ def index():
         args_text="[]",
         env_text="{}",
         timeout_text="15",
+        server_id=None,
         result=None,
         error=None,
         diagnostics=None,
@@ -67,10 +76,25 @@ def connect():
     diagnostics = None
     server_id = None
     started_at = time.perf_counter()
+    env = {}
+
+    existing_server = next(
+        (
+            server
+            for server in get_servers()
+            if server["name"] == server_name
+        ),
+        None,
+    )
+    if existing_server:
+        with server_environments_lock:
+            server_environments.pop(existing_server["id"], None)
 
     try:
         if not server_name:
             raise ValueError("Enter a server name.")
+        if len(server_name) > 120:
+            raise ValueError("Server names must be 120 characters or fewer.")
 
         args = json.loads(args_text)
         env = json.loads(env_text)
@@ -97,12 +121,21 @@ def connect():
             timeout=timeout,
         )
 
-        result = inspect_server(
-            command=command,
-            args=args,
-            env=env,
-            timeout=timeout,
+        with server_environments_lock:
+            server_environments.pop(server_id, None)
+
+        result = redact_secrets(
+            inspect_server(
+                command=command,
+                args=args,
+                env=env,
+                timeout=timeout,
+            ),
+            env,
         )
+
+        with server_environments_lock:
+            server_environments[server_id] = env.copy()
 
         diagnostics["diagnostics"].append({
             "level": "success",
@@ -143,6 +176,8 @@ def connect():
         "success" if result is not None and error is None
         else "error"
     )
+    error = redact_secrets(error, env)
+    diagnostics = redact_secrets(diagnostics, env)
 
     try:
         save_connection_attempt(
@@ -164,8 +199,9 @@ def connect():
         server_name=server_name,
         command=command,
         args_text=args_text,
-        env_text=env_text,
+        env_text="{}",
         timeout_text=timeout_text,
+        server_id=server_id,
         result=result,
         error=error,
         diagnostics=diagnostics,
@@ -182,13 +218,13 @@ def connect():
 
 @app.post("/execute")
 def execute():
-    server_name = request.form.get("server_name", "").strip()
-    command = request.form.get("command", "").strip()
-    args_text = request.form.get("args", "[]")
-    env_text = request.form.get("env", "{}")
-    timeout_text = request.form.get("timeout", "15")
+    server_name = ""
+    command = ""
+    args_text = "[]"
+    timeout_text = "15"
     tool_name = request.form.get("tool_name", "").strip()
     tool_arguments_text = request.form.get("tool_arguments", "{}")
+    server_id = None
 
     result = None
     error = None
@@ -201,26 +237,40 @@ def execute():
     env = {}
     tool_arguments = {}
     timeout = 15
-    server_id = None
     execution_result_for_history = None
     execution_duration_for_history = None
+    execution_started_at = time.perf_counter()
 
     try:
-        if not server_name:
-            raise ValueError("Enter a server name.")
-
-        args = json.loads(args_text)
-        env = json.loads(env_text)
-        timeout = float(timeout_text)
-        tool_arguments = json.loads(tool_arguments_text)
-
-        if not isinstance(args, list):
-            raise ValueError("Arguments must be a JSON array.")
-
-        if not isinstance(env, dict):
+        raw_server_id = request.form.get("server_id", "")
+        try:
+            server_id = int(raw_server_id)
+        except (TypeError, ValueError) as exc:
             raise ValueError(
-                "Environment variables must be a JSON object."
+                "Reconnect to a saved server before executing a tool."
+            ) from exc
+
+        server = get_server(server_id)
+        if server is None:
+            raise ValueError(
+                "The selected server configuration no longer exists."
             )
+
+        server_name = server["name"]
+        command = server["command"]
+        args = server["args"]
+        timeout = float(server["timeout"])
+        args_text = json.dumps(args)
+        timeout_text = str(server["timeout"])
+        with server_environments_lock:
+            env = server_environments.get(server_id, {}).copy()
+        if server["env_keys"] and not env:
+            raise ValueError(
+                "Environment values are available only until the app "
+                "restarts. Re-enter them and reconnect to this server."
+            )
+
+        tool_arguments = json.loads(tool_arguments_text)
 
         if not isinstance(tool_arguments, dict):
             raise ValueError(
@@ -239,20 +289,15 @@ def execute():
                 "Server configuration contains errors."
             )
 
-        server_id = save_server(
-            name=server_name,
-            command=command,
-            args=args,
-            env=env,
-            timeout=timeout,
-        )
-
         # Reconnect and rediscover capabilities before execution.
-        result = inspect_server(
-            command=command,
-            args=args,
-            env=env,
-            timeout=timeout,
+        result = redact_secrets(
+            inspect_server(
+                command=command,
+                args=args,
+                env=env,
+                timeout=timeout,
+            ),
+            env,
         )
 
         # Only execute a tool advertised by this server.
@@ -274,7 +319,14 @@ def execute():
             timeout=timeout,
         )
 
-        execution_result_for_history = execution.get("result")
+        execution_result_for_history = redact_secrets(
+            execution.get("result"),
+            env,
+        )
+        execution = {
+            **execution,
+            "result": execution_result_for_history,
+        }
         execution_duration_for_history = execution.get("duration_ms")
 
         tool_result = execution_result_for_history
@@ -298,6 +350,7 @@ def execute():
                 error_details
                 or "The MCP tool returned isError=true."
             )
+            execution_error = redact_secrets(execution_error, env)
 
             execution_diagnostics = {
                 "success": False,
@@ -310,7 +363,7 @@ def execute():
                 server_id=server_id,
                 server_name=server_name,
                 tool_name=tool_name,
-                arguments=tool_arguments,
+                arguments=redact_secrets(tool_arguments, env),
                 result=execution_result_for_history,
                 status="success",
                 duration_ms=execution_duration_for_history,
@@ -336,11 +389,11 @@ def execute():
         }
 
     except TimeoutError as exc:
-        execution_error = str(exc)
+        execution_error = redact_secrets(str(exc), env)
         execution_diagnostics = diagnose_execution_error(exc)
 
     except ValueError as exc:
-        execution_error = str(exc)
+        execution_error = redact_secrets(str(exc), env)
         execution_diagnostics = diagnose_execution_error(exc)
 
     except Exception as exc:
@@ -351,20 +404,27 @@ def execute():
         execution_error = "Tool execution failed."
         execution_diagnostics = diagnose_execution_error(exc)
 
+    if execution_diagnostics:
+        execution_diagnostics = redact_secrets(execution_diagnostics, env)
+
+    if execution_error and execution_duration_for_history is None:
+        execution_duration_for_history = round(
+            (time.perf_counter() - execution_started_at) * 1000,
+            2,
+        )
+
     # Record failed executions, preserving any returned tool response.
     if (
         execution_error
         and tool_name
         and isinstance(tool_arguments, dict)
-        and isinstance(args, list)
-        and isinstance(env, dict)
     ):
         try:
             save_execution(
                 server_id=server_id,
                 server_name=server_name or "Unknown",
                 tool_name=tool_name,
-                arguments=tool_arguments,
+                arguments=redact_secrets(tool_arguments, env),
                 result=execution_result_for_history,
                 status="error",
                 duration_ms=execution_duration_for_history,
@@ -381,8 +441,9 @@ def execute():
         server_name=server_name,
         command=command,
         args_text=args_text,
-        env_text=env_text,
+        env_text="{}",
         timeout_text=timeout_text,
+        server_id=server_id,
         result=result,
         error=error,
         diagnostics=diagnostics,
@@ -390,7 +451,7 @@ def execute():
         execution_error=execution_error,
         execution_diagnostics=execution_diagnostics,
         selected_tool=tool_name,
-        tool_arguments_text=tool_arguments_text,
+        tool_arguments_text=redact_secrets(tool_arguments_text, env),
         servers=get_servers(),
         history=get_execution_history(),
         connection_history=get_connection_history(),
