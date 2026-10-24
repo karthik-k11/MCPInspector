@@ -14,6 +14,7 @@ def client(tmp_path, monkeypatch):
         "DATABASE_PATH",
         str(db_path),
     )
+    monkeypatch.setattr(app_module, "server_environments", {})
 
     database.init_db()
 
@@ -49,6 +50,23 @@ def fake_inspection(*args, **kwargs):
     }
 
 
+def connect_server(client, env="{}"):
+    response = client.post(
+        "/connect",
+        data={
+            "server_name": "Test Server",
+            "command": "python",
+            "args": "[]",
+            "env": env,
+            "timeout": "15",
+        },
+    )
+
+    assert response.status_code == 200
+    assert b"CONNECTION_SUCCESS" in response.data
+    return app_module.get_servers()[0]["id"]
+
+
 def test_dashboard_loads(client):
     response = client.get("/")
 
@@ -56,6 +74,9 @@ def test_dashboard_loads(client):
     assert b"MCPInspector" in response.data
     assert b"Saved Servers" in response.data
     assert b"Execution History" in response.data
+    assert b"connectionStatusFilter" in response.data
+    assert b"executionStatusFilter" in response.data
+    assert b"No tool executions recorded yet." in response.data
 
 
 def test_connect_saves_server(
@@ -74,7 +95,7 @@ def test_connect_saves_server(
             "server_name": "Test Server",
             "command": "python",
             "args": "[]",
-            "env": "{}",
+            "env": '{"API_KEY": "super-secret"}',
             "timeout": "15",
         },
     )
@@ -82,11 +103,44 @@ def test_connect_saves_server(
     assert response.status_code == 200
     assert b"CONNECTION_SUCCESS" in response.data
     assert b"Test Server" in response.data
+    assert b"super-secret" not in response.data
 
     servers = app_module.get_servers()
 
     assert len(servers) == 1
     assert servers[0]["name"] == "Test Server"
+    assert servers[0]["env_keys"] == ["API_KEY"]
+
+
+def test_connection_failure_is_diagnosed_and_recorded(client, monkeypatch):
+    def missing_server(*args, **kwargs):
+        raise FileNotFoundError("secret-value")
+
+    monkeypatch.setattr(
+        app_module,
+        "inspect_server",
+        missing_server,
+    )
+    response = client.post(
+        "/connect",
+        data={
+            "server_name": "Missing Server",
+            "command": "missing-server",
+            "args": "[]",
+            "env": '{"API_KEY": "secret-value"}',
+            "timeout": "15",
+        },
+    )
+
+    history = app_module.get_connection_history()
+
+    assert response.status_code == 200
+    assert b"EXECUTABLE_NOT_FOUND" in response.data
+    assert b"secret-value" not in response.data
+    assert history[0]["status"] == "error"
+    assert history[0]["error_message"] == (
+        "Connection failed. Check the server configuration."
+    )
 
 
 def test_tool_execution_saves_successful_history(
@@ -114,14 +168,11 @@ def test_tool_execution_saves_successful_history(
         },
     )
 
+    server_id = connect_server(client)
     response = client.post(
         "/execute",
         data={
-            "server_name": "Test Server",
-            "command": "python",
-            "args": "[]",
-            "env": "{}",
-            "timeout": "15",
+            "server_id": str(server_id),
             "tool_name": "add",
             "tool_arguments": '{"a": 2, "b": 3}',
         },
@@ -149,14 +200,11 @@ def test_tool_execution_rejects_unknown_tool(
         fake_inspection,
     )
 
+    server_id = connect_server(client)
     response = client.post(
         "/execute",
         data={
-            "server_name": "Test Server",
-            "command": "python",
-            "args": "[]",
-            "env": "{}",
-            "timeout": "15",
+            "server_id": str(server_id),
             "tool_name": "unknown_tool",
             "tool_arguments": "{}",
         },
@@ -190,14 +238,11 @@ def test_tool_execution_records_failure(
         failing_execution,
     )
 
+    server_id = connect_server(client)
     response = client.post(
         "/execute",
         data={
-            "server_name": "Test Server",
-            "command": "python",
-            "args": "[]",
-            "env": "{}",
-            "timeout": "15",
+            "server_id": str(server_id),
             "tool_name": "add",
             "tool_arguments": '{"a": 2, "b": 3}',
         },
@@ -234,14 +279,11 @@ def test_tool_error_response_is_recorded_as_failure(client, monkeypatch):
         },
     )
 
+    server_id = connect_server(client)
     response = client.post(
         "/execute",
         data={
-            "server_name": "Test Server",
-            "command": "python",
-            "args": "[]",
-            "env": "{}",
-            "timeout": "15",
+            "server_id": str(server_id),
             "tool_name": "add",
             "tool_arguments": '{"a": 2, "b": 3}',
         },
@@ -255,3 +297,79 @@ def test_tool_error_response_is_recorded_as_failure(client, monkeypatch):
     assert history[0]["status"] == "error"
     assert "Invalid input" in history[0]["error_message"]
     assert history[0]["result"]["isError"] is True
+
+
+def test_environment_values_are_redacted_from_tool_history(
+    client,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        app_module,
+        "inspect_server",
+        fake_inspection,
+    )
+    monkeypatch.setattr(
+        app_module,
+        "execute_tool",
+        lambda **kwargs: {
+            "tool": "add",
+            "duration_ms": 2.5,
+            "result": {
+                "content": [
+                    {"type": "text", "text": "secret-value"}
+                ],
+                "isError": False,
+            },
+        },
+    )
+
+    server_id = connect_server(
+        client,
+        env='{"API_KEY": "secret-value"}',
+    )
+    response = client.post(
+        "/execute",
+        data={
+            "server_id": str(server_id),
+            "tool_name": "add",
+            "tool_arguments": '{"input": "secret-value"}',
+        },
+    )
+
+    history = app_module.get_execution_history()
+
+    assert b"secret-value" not in response.data
+    assert history[0]["arguments"] == {"input": "[REDACTED]"}
+    assert history[0]["result"]["content"][0]["text"] == "[REDACTED]"
+
+
+def test_execution_timeout_is_displayed_and_recorded(client, monkeypatch):
+    monkeypatch.setattr(
+        app_module,
+        "inspect_server",
+        fake_inspection,
+    )
+
+    def timed_out(**kwargs):
+        raise TimeoutError("Tool execution timed out after 1 seconds.")
+
+    monkeypatch.setattr(app_module, "execute_tool", timed_out)
+    server_id = connect_server(client)
+    response = client.post(
+        "/execute",
+        data={
+            "server_id": str(server_id),
+            "tool_name": "add",
+            "tool_arguments": '{"a": 1, "b": 2}',
+        },
+    )
+
+    history = app_module.get_execution_history()
+
+    assert b"TOOL_TIMEOUT" in response.data
+    assert b"timed out" in response.data.lower()
+    assert history[0]["status"] == "error"
+    assert history[0]["error_message"] == (
+        "Tool execution timed out after 1 seconds."
+    )
+    assert history[0]["duration_ms"] is not None

@@ -1,6 +1,8 @@
 import json
+import sqlite3
 
 import database
+import pytest
 from services.history_service import (
     get_execution_history,
     get_servers,
@@ -16,6 +18,20 @@ def test_database_initializes(tmp_path, monkeypatch):
     database.init_db()
 
     assert db_path.exists()
+
+
+def test_database_connections_are_closed(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        database,
+        "DATABASE_PATH",
+        str(tmp_path / "test.db"),
+    )
+
+    with database.get_connection() as connection:
+        connection.execute("SELECT 1")
+
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        connection.execute("SELECT 1")
 
 
 def test_server_configuration_is_saved_without_env_values(
@@ -113,11 +129,21 @@ def test_server_with_same_name_is_updated(tmp_path, monkeypatch):
     assert servers[0]["timeout"] == 20
 
 
-def test_connection_attempts_are_saved_and_retrieved():
+def test_connection_attempts_are_saved_and_retrieved(
+    tmp_path,
+    monkeypatch,
+):
     from services.history_service import (
         get_connection_history,
         save_connection_attempt,
     )
+
+    monkeypatch.setattr(
+        database,
+        "DATABASE_PATH",
+        str(tmp_path / "test.db"),
+    )
+    database.init_db()
 
     save_connection_attempt(
         server_id=None,
@@ -136,7 +162,7 @@ def test_connection_attempts_are_saved_and_retrieved():
         error_message="Executable not found",
     )
 
-    history = get_connection_history()
+    history = get_connection_history(limit=2)
 
     assert len(history) == 2
     assert history[0]["server_name"] == "Broken Server"
